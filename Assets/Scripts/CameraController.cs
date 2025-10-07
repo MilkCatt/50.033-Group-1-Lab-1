@@ -1,33 +1,91 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 public class CameraController : MonoBehaviour
 {
+    [Header("Targets")]
+    public Transform player;     // Mario
+    public Transform endLimit;   // level end anchor
 
-   public Transform player; // Mario's Transform
-   public Transform endLimit; // GameObject that indicates end of map
-   private float offset; // initial x-offset between camera and Mario
-   private float startX; // smallest x-coordinate of the Camera
-   private float endX; // largest x-coordinate of the camera
-   private float viewportHalfWidth;
+    [Header("Horizontal Follow")]
+    [Tooltip("Pixels (world units) to keep as initial X offset from player.")]
+    public float xOffset = 0f;
+    [Tooltip("Smooth time for horizontal damping.")]
+    public float xSmoothTime = 0.08f;
 
-   void Start()
-   {
-      // get coordinate of the bottomleft of the viewport
-      // z doesn't matter since the camera is orthographic
-      Vector3 bottomLeft = Camera.main.ViewportToWorldPoint(new Vector3(0, 0, 0)); // the z-component is the distance of the resulting plane from the camera 
-      viewportHalfWidth = Mathf.Abs(bottomLeft.x - this.transform.position.x);
-      offset = this.transform.position.x - player.position.x;
-      startX = this.transform.position.x;
-      endX = endLimit.transform.position.x - viewportHalfWidth;
-   }
+    [Header("Vertical Follow")]
+    [Tooltip("How far above the player the camera is allowed to float at most.")]
+    public float maxRiseAboveGround = 3.0f;
+    [Tooltip("Minimum ground Y for the camera (usually your floor).")]
+    public float minY = 0.0f;
+    [Tooltip("Vertical smoothing.")]
+    public float ySmoothTime = 0.12f;
 
-   void Update()
-   {
-      float desiredX = player.position.x + offset;
-      // check if desiredX is within startX and endX
-      if (desiredX > startX && desiredX < endX)
-         this.transform.position = new Vector3(desiredX, this.transform.position.y, this.transform.position.z);
-   }
+    private float _startX;    // smallest X of camera
+    private float _endX;      // largest X of camera
+    private float _viewportHalfWidth;
+
+    private float _xVel;      // SmoothDamp velocity caches
+    private float _yVel;
+
+    private float _groundBaselineY; // snapshot of where camera sits when player is grounded
+
+    void Start()
+    {
+        if (!player) { Debug.LogError("CameraController: Missing player."); enabled = false; return; }
+
+        // compute viewport half width (orthographic)
+        var cam = GetComponent<Camera>();
+        float halfHeight = cam.orthographicSize;
+        float halfWidth  = halfHeight * cam.aspect;
+        _viewportHalfWidth = halfWidth;
+
+        // establish horizontal clamp range
+        _startX = transform.position.x; // assume scene starts framed correctly
+        float endWorldX = endLimit ? endLimit.position.x : _startX;
+        _endX = endWorldX - _viewportHalfWidth;
+
+        // initial horizontal offset from player (optional)
+        xOffset = Mathf.Approximately(xOffset, 0f) ? (transform.position.x - player.position.x) : xOffset;
+
+        // baseline ground Y is current camera Y at start
+        _groundBaselineY = Mathf.Max(minY, transform.position.y);
+    }
+
+    void LateUpdate()
+    {
+        if (!player) return;
+
+        // --- Horizontal follow with clamp ---
+        float targetX = player.position.x + xOffset;
+        // clamp to [startX, endX]
+        targetX = Mathf.Clamp(targetX, _startX, _endX);
+        float newX = Mathf.SmoothDamp(transform.position.x, targetX, ref _xVel, xSmoothTime);
+
+        // --- Vertical follow (limited rise) ---
+        // We allow the camera to rise up to maxRiseAboveGround from the *baseline*.
+        float desiredY = _groundBaselineY;
+
+        // If player is above baseline, float up towards a limited ceiling
+        if (player.position.y > _groundBaselineY)
+        {
+            float capY = _groundBaselineY + maxRiseAboveGround;
+            desiredY = Mathf.Min(player.position.y, capY);
+        }
+
+        // Always respect a minimum Y (e.g., ground/floor)
+        desiredY = Mathf.Max(desiredY, minY);
+
+        float newY = Mathf.SmoothDamp(transform.position.y, desiredY, ref _yVel, ySmoothTime);
+
+        transform.position = new Vector3(newX, newY, transform.position.z);
+    }
+
+    /// <summary>
+    /// Call this from your player when he lands to "re-anchor" the baseline,
+    /// so the camera doesn't keep floating high after big jumps.
+    /// </summary>
+    public void ReanchorGroundBaseline(float playerGroundY)
+    {
+        _groundBaselineY = Mathf.Max(minY, playerGroundY);
+    }
 }

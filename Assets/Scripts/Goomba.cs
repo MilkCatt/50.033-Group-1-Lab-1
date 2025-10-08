@@ -31,6 +31,6 @@ public class Goomba : MonoBehaviour
         if (_rb) _rb.linearVelocity = Vector2.zero;    // stop movement
         if (_col) _col.enabled = false;               // no more hits
 
-        Destroy(gameObject, 0.25f);                   // small delay to show feedback
+        Destroy(gameObject, 0.5f);                   // small delay to show feedback
     }
 }
